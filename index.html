@@ -178,6 +178,9 @@
 // ARES-1  Autonomous Mars Sample Return Simulator
 // ─────────────────────────────────────────────────────────────────────────────
 
+// USGS-derived Mars mineral library.
+// bands: normalized reflectance (0-1) at 8 evenly-spaced wavelengths from 400 nm to 2500 nm
+// conf:  classifier confidence (0-1) used by the LIBS spectrometer
 const MINERALS = [
   { name:'Hematite',   color:0xaa3300, mass:12.4, conf:0.94, bands:[.35,.62,.87,.43,.71,.58,.39,.80] },
   { name:'Olivine',    color:0x4a7c2f, mass:9.8,  conf:0.88, bands:[.28,.50,.75,.60,.40,.65,.55,.45] },
@@ -189,7 +192,10 @@ const MINERALS = [
   { name:'Carbonate',  color:0xc8b88a, mass:8.9,  conf:0.85, bands:[.75,.68,.62,.58,.72,.80,.85,.90] },
 ];
 
-// Scene globals
+// Max chars for target mineral name display in status bar (UI space constraint)
+const TARGET_NAME_MAX_LEN = 6;
+// Battery drain rate in percent per second (98% → 0% over ~9 hours of simulated ops)
+const BATTERY_DRAIN_RATE = 0.003;
 let scene, camera, renderer, clock;
 let marsGroup, roverGroup, armGroup;
 let terrainMesh, dustParticles;
@@ -584,7 +590,8 @@ function buildEndEffector(parent) {
   laser.rotation.x = Math.PI / 2;
   parent.add(laser);
 
-  // Two tapered fingers
+  // Two tapered fingers — references stored on the group for reliable retrieval
+  const gripperFingers = [];
   [-0.055, 0.055].forEach(ox => {
     const finger = new THREE.Group();
     finger.position.set(ox, 0.14, 0);
@@ -603,7 +610,10 @@ function buildEndEffector(parent) {
     sensor.position.set(ox < 0 ? 0.022 : -0.022, 0.21, 0);
     finger.add(sensor);
     parent.add(finger);
+    gripperFingers.push(finger);
   });
+  // Attach finger references so applyJoints() can find them without relying on child index
+  parent.userData.fingers = gripperFingers;
 }
 
 // ─── ROCKS / SAMPLES ─────────────────────────────────────────────────────────
@@ -641,7 +651,11 @@ function spawnRocks() {
     ring.position.set(px, py - size * 0.4, pz);
     scene.add(ring);
 
-    sampleRocks.push({ mesh, ring, mineral, collected: false, px, pz });
+    // Stable mini-cam screen position (computed once at spawn, not per-frame)
+    const camOffX = (Math.random() - 0.5) * 60;
+    const camOffY = (Math.random() - 0.5) * 40;
+
+    sampleRocks.push({ mesh, ring, mineral, collected: false, px, pz, camOffX, camOffY });
   }
 }
 
@@ -750,9 +764,9 @@ function drawSpectrometer(mineral) {
   specCtx.fillStyle = 'rgba(0,255,200,0.08)';
   specCtx.fill();
 
-  // Confidence bar
+  // Confidence bar width: conf (0-1) mapped to max 110 px of the 220 px canvas
   specCtx.fillStyle = '#ff6a00';
-  specCtx.fillRect(5, 5, (mineral.conf * 100).toFixed(0) * 1.1, 4);
+  specCtx.fillRect(5, 5, mineral.conf * 110, 4);
 
   // Labels
   specCtx.fillStyle = '#ffcc00';
@@ -786,8 +800,8 @@ function drawMiniCam() {
     const dist = eePos.distanceTo(r.mesh.position);
     if (dist > 8) return;
 
-    const screenX = 100 + (Math.random() - .5) * 60 * (dist > 4 ? 1 : 2);
-    const screenY = 80 + (Math.random() - .5) * 40;
+    const screenX = 100 + r.camOffX * (dist > 4 ? 1 : 2);
+    const screenY = 80 + r.camOffY;
     const sz = Math.max(4, 18 - dist * 1.5);
 
     miniCtx.strokeStyle = '#00ffcc';
@@ -975,10 +989,10 @@ function applyJoints() {
   if (jointMeshes.j5) jointMeshes.j5.rotation.z = joints.j5;
   if (jointMeshes.j6) jointMeshes.j6.rotation.y = joints.j6;
   if (jointMeshes.j7) {
-    // Gripper open/close
+    // Gripper open/close — use stored userData.fingers set during construction
     const open = joints.j7;
-    const fingers = jointMeshes.j7.children.filter((c, i) => i > 1);
-    if (fingers.length >= 2) {
+    const fingers = jointMeshes.j7.userData.fingers;
+    if (fingers && fingers.length >= 2) {
       fingers[0].position.x = -0.055 - open * 0.08;
       fingers[1].position.x =  0.055 + open * 0.08;
     }
@@ -1005,7 +1019,7 @@ function updateRover(dt) {
     });
   }
   document.getElementById('status-target').textContent =
-    targetRock ? `TARGET: ${targetRock.mineral.name.substring(0,6).toUpperCase()}` : 'TARGET: SCANNING';
+    targetRock ? `TARGET: ${targetRock.mineral.name.substring(0, TARGET_NAME_MAX_LEN).toUpperCase()}` : 'TARGET: SCANNING';
 }
 
 // ─── DUST ANIMATION ──────────────────────────────────────────────────────────
@@ -1140,7 +1154,7 @@ function showMissionComplete() {
 // ─── HUD UPDATE ──────────────────────────────────────────────────────────────
 function updateHUD(dt) {
   missionTime += dt;
-  battery = Math.max(0, battery - dt * 0.003);
+  battery = Math.max(0, battery - dt * BATTERY_DRAIN_RATE);
   const h = Math.floor(missionTime / 3600);
   const m = Math.floor((missionTime % 3600) / 60);
   const s = Math.floor(missionTime % 60);
