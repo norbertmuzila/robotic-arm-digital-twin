@@ -1,0 +1,1209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ARES-1 Autonomous Mars Sample Return Mission</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0005; color: #ff6a00; font-family: 'Courier New', monospace; overflow: hidden; }
+  #canvas { display: block; width: 100vw; height: 100vh; }
+  #hud {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    pointer-events: none; display: flex; flex-direction: column;
+    justify-content: space-between;
+  }
+  #top-bar {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    padding: 12px 16px; background: linear-gradient(180deg,rgba(0,0,0,.7) 0%,transparent 100%);
+  }
+  #title-block { pointer-events: none; }
+  #title-block h1 { font-size: 18px; letter-spacing: 3px; color: #ff6a00; text-shadow: 0 0 12px #ff6a00; }
+  #title-block .sub { font-size: 10px; letter-spacing: 2px; color: #ff9944; }
+  #status-block { text-align: right; font-size: 11px; line-height: 1.8; }
+  #status-fsm { font-size: 14px; font-weight: bold; letter-spacing: 2px; }
+  .status-ok { color: #00ff88; }
+  .status-warn { color: #ffcc00; }
+  .status-active { color: #ff6a00; }
+
+  #cam-label {
+    position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
+    font-size: 11px; letter-spacing: 3px; color: #ffcc00; opacity: .8;
+  }
+
+  #mini-cam {
+    position: fixed; top: 60px; right: 16px; width: 200px; height: 150px;
+    border: 1px solid #ff6a0066; background: rgba(0,0,0,.6);
+    overflow: hidden;
+  }
+  #mini-cam canvas { width: 100%; height: 100%; }
+  #mini-cam-label {
+    position: absolute; bottom: 0; left: 0; right: 0;
+    background: rgba(0,0,0,.7); font-size: 9px; letter-spacing: 1px;
+    color: #00ffcc; text-align: center; padding: 2px;
+  }
+
+  #tray-panel {
+    position: fixed; left: 16px; top: 60px; width: 200px;
+    background: rgba(0,0,0,.65); border: 1px solid #ff6a0044; padding: 10px;
+    font-size: 10px; line-height: 1.9;
+  }
+  #tray-panel h3 { font-size: 11px; letter-spacing: 2px; color: #ff9944; margin-bottom: 6px; }
+  .tray-row { display: flex; justify-content: space-between; }
+  .mineral-tag { color: #00ffcc; }
+  .mass-tag { color: #ffcc00; }
+
+  #spectrometer {
+    position: fixed; left: 16px; bottom: 100px; width: 220px; height: 100px;
+    background: rgba(0,0,0,.75); border: 1px solid #ff6a0044;
+  }
+  #spectrometer canvas { width: 100%; height: 100%; }
+  #spec-label { font-size: 9px; color: #ff9944; padding: 3px 6px; letter-spacing: 1px; }
+
+  #joint-panel {
+    position: fixed; right: 16px; bottom: 100px; width: 190px;
+    background: rgba(0,0,0,.65); border: 1px solid #ff6a0044; padding: 10px;
+    font-size: 10px; line-height: 1.9;
+  }
+  #joint-panel h3 { font-size: 11px; letter-spacing: 2px; color: #ff9944; margin-bottom: 6px; }
+  .joint-bar { height: 4px; background: #111; margin: 2px 0 6px; }
+  .joint-bar-fill { height: 100%; background: linear-gradient(90deg,#ff6a00,#ff9944); transition: width .2s; }
+
+  #bottom-bar {
+    display: flex; justify-content: center; align-items: center; gap: 10px;
+    padding: 14px; background: linear-gradient(0deg,rgba(0,0,0,.8) 0%,transparent 100%);
+    pointer-events: all;
+  }
+  .btn {
+    background: rgba(0,0,0,.7); border: 1px solid #ff6a00;
+    color: #ff6a00; padding: 8px 18px; cursor: pointer;
+    font-family: 'Courier New', monospace; font-size: 11px;
+    letter-spacing: 1px; transition: all .2s;
+    text-transform: uppercase;
+  }
+  .btn:hover { background: #ff6a00; color: #000; }
+  .btn.active { background: #ff6a00; color: #000; }
+  .btn-small { padding: 6px 12px; font-size: 10px; }
+
+  #crosshair {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    width: 20px; height: 20px; pointer-events: none; opacity: .5;
+  }
+  #crosshair::before, #crosshair::after {
+    content: ''; position: absolute; background: #ff6a00;
+  }
+  #crosshair::before { width: 100%; height: 1px; top: 50%; left: 0; }
+  #crosshair::after { width: 1px; height: 100%; top: 0; left: 50%; }
+
+  #scan-ring {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    width: 60px; height: 60px; border-radius: 50%;
+    border: 1px dashed #00ffcc; pointer-events: none; opacity: 0;
+    transition: opacity .3s;
+  }
+  #scan-ring.visible { opacity: .6; animation: spin 3s linear infinite; }
+  @keyframes spin { to { transform: translate(-50%,-50%) rotate(360deg); } }
+
+  #overlay-msg {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    background: rgba(0,0,0,.85); border: 1px solid #ff6a00;
+    padding: 30px 50px; text-align: center; display: none;
+    pointer-events: none;
+  }
+  #overlay-msg h2 { font-size: 22px; letter-spacing: 4px; color: #ff6a00; }
+  #overlay-msg p { font-size: 11px; color: #ff9944; margin-top: 8px; letter-spacing: 1px; }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+
+<div id="hud">
+  <div id="top-bar">
+    <div id="title-block">
+      <h1>ARES-1</h1>
+      <div class="sub">AUTONOMOUS MARS SAMPLE RETURN MISSION</div>
+      <div class="sub" id="mission-time">MET: 00:00:00</div>
+    </div>
+    <div id="status-block">
+      <div id="status-fsm" class="status-active">ROAM</div>
+      <div id="status-target">TARGET: SCANNING</div>
+      <div id="status-samples">SAMPLES: 0/8</div>
+      <div id="status-battery" class="status-ok">BATTERY: 98%</div>
+    </div>
+  </div>
+</div>
+
+<div id="cam-label">ORBIT VIEW</div>
+<div id="scan-ring"></div>
+<div id="crosshair"></div>
+
+<div id="mini-cam">
+  <canvas id="mini-canvas" width="200" height="150"></canvas>
+  <div id="mini-cam-label">EE MULTISPECTRAL CAM</div>
+</div>
+
+<div id="tray-panel">
+  <h3>⬡ SAMPLE TRAY</h3>
+  <div id="tray-list"><div style="color:#555">— EMPTY —</div></div>
+  <div style="border-top:1px solid #ff6a0033;margin-top:6px;padding-top:6px;">
+    <div class="tray-row"><span>TOTAL MASS</span><span class="mass-tag" id="total-mass">0.0 g</span></div>
+    <div class="tray-row"><span>SLOTS USED</span><span class="mass-tag" id="slots-used">0 / 8</span></div>
+  </div>
+</div>
+
+<div id="spectrometer">
+  <div id="spec-label">SPECTROMETER — <span id="spec-mineral">IDLE</span></div>
+  <canvas id="spec-canvas" width="220" height="80"></canvas>
+</div>
+
+<div id="joint-panel">
+  <h3>⬡ ARM JOINTS</h3>
+  <div id="joint-list"></div>
+</div>
+
+<div id="bottom-bar">
+  <button class="btn" id="btn-auto" onclick="toggleAuto()">⬢ AUTONOMOUS</button>
+  <button class="btn btn-small" onclick="cycleView()">⊞ CYCLE VIEW</button>
+  <button class="btn btn-small" onclick="resetMission()">↺ RESET MISSION</button>
+</div>
+
+<div id="overlay-msg">
+  <h2 id="overlay-title">MISSION COMPLETE</h2>
+  <p id="overlay-sub">ALL SAMPLES COLLECTED</p>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+// ARES-1  Autonomous Mars Sample Return Simulator
+// ─────────────────────────────────────────────────────────────────────────────
+
+// USGS-derived Mars mineral library.
+// bands: normalized reflectance (0-1) at 8 evenly-spaced wavelengths from 400 nm to 2500 nm
+// conf:  classifier confidence (0-1) used by the LIBS spectrometer
+const MINERALS = [
+  { name:'Hematite',   color:0xaa3300, mass:12.4, conf:0.94, bands:[.35,.62,.87,.43,.71,.58,.39,.80] },
+  { name:'Olivine',    color:0x4a7c2f, mass:9.8,  conf:0.88, bands:[.28,.50,.75,.60,.40,.65,.55,.45] },
+  { name:'Pyroxene',   color:0x5a4a3a, mass:15.2, conf:0.91, bands:[.55,.70,.42,.38,.68,.50,.60,.75] },
+  { name:'Basalt',     color:0x3a3a4a, mass:18.6, conf:0.97, bands:[.80,.65,.55,.45,.35,.60,.70,.85] },
+  { name:'Gypsum',     color:0xe0d0b0, mass:7.2,  conf:0.86, bands:[.90,.85,.78,.72,.68,.80,.88,.92] },
+  { name:'Magnetite',  color:0x222233, mass:21.0, conf:0.93, bands:[.20,.35,.50,.65,.80,.70,.55,.40] },
+  { name:'Jarosite',   color:0xcc8800, mass:11.3, conf:0.89, bands:[.60,.78,.90,.55,.40,.70,.85,.65] },
+  { name:'Carbonate',  color:0xc8b88a, mass:8.9,  conf:0.85, bands:[.75,.68,.62,.58,.72,.80,.85,.90] },
+];
+
+// Max chars for target mineral name display in status bar (UI space constraint)
+const TARGET_NAME_MAX_LEN = 6;
+// Battery drain rate in percent per second (98% → 0% over ~9 hours of simulated ops)
+const BATTERY_DRAIN_RATE = 0.003;
+let scene, camera, renderer, clock;
+let marsGroup, roverGroup, armGroup;
+let terrainMesh, dustParticles;
+let sampleRocks = [], traySlots = [];
+let orbitTarget = new THREE.Vector3(0,0,0);
+let cameraMode = 0; // 0=ORBIT 1=CHASE 2=ARM 3=TOP 4=COLLECTED
+const CAM_NAMES = ['ORBIT VIEW','CHASE VIEW','ARM VIEW','TOP VIEW','COLLECTED VIEW'];
+
+// Rover state
+let roverPos = new THREE.Vector3(0, 0.4, 0);
+let roverYaw = 0;
+let roverSpeed = 0;
+let roverTarget = new THREE.Vector3(8, 0.4, -5);
+
+// Arm joints (radians)
+let joints = { j1:0, j2:0.2, j3:0.6, j4:0, j5:0.3, j6:0, j7:0 };
+let jointMeshes = {};
+
+// FSM
+const FSM = { ROAM:'ROAM', APPROACH:'APPROACH', DEPLOY:'DEPLOY',
+              ANALYZE:'ANALYZE', GRIP:'GRIP', STOW:'STOW', RESUME:'RESUME' };
+let fsmState = FSM.ROAM;
+let fsmTimer = 0;
+let targetRock = null;
+let autonomous = false;
+let missionTime = 0;
+let samplesCollected = 0;
+const MAX_SAMPLES = 8;
+let battery = 98;
+let scanActive = false;
+let currentMineral = null;
+let missionComplete = false;
+
+// Orbit control state
+let orbitTheta = 0.4, orbitPhi = 1.1, orbitRadius = 18;
+let isDragging = false, lastMX = 0, lastMY = 0;
+
+// ─── INIT ────────────────────────────────────────────────────────────────────
+function init() {
+  clock = new THREE.Clock();
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x1a0a05);
+  scene.fog = new THREE.Fog(0x3d1a08, 40, 120);
+
+  const canvas = document.getElementById('canvas');
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 0.9;
+
+  camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 300);
+  camera.position.set(12, 8, 14);
+  camera.lookAt(0, 0, 0);
+
+  setupLighting();
+  buildTerrain();
+  buildDust();
+  buildRover();
+  buildArm();
+  spawnRocks();
+  buildTray();
+  buildJointUI();
+
+  window.addEventListener('resize', onResize);
+  canvas.addEventListener('mousedown', onMouseDown);
+  canvas.addEventListener('mousemove', onMouseMove);
+  canvas.addEventListener('mouseup', () => isDragging = false);
+  canvas.addEventListener('wheel', onWheel, { passive: true });
+
+  animate();
+}
+
+// ─── LIGHTING ────────────────────────────────────────────────────────────────
+function setupLighting() {
+  const sun = new THREE.DirectionalLight(0xffa060, 1.6);
+  sun.position.set(30, 50, -20);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.camera.left = -40;
+  sun.shadow.camera.right = 40;
+  sun.shadow.camera.top = 40;
+  sun.shadow.camera.bottom = -40;
+  sun.shadow.camera.far = 200;
+  scene.add(sun);
+
+  const amb = new THREE.AmbientLight(0x4a2010, 0.8);
+  scene.add(amb);
+
+  const fill = new THREE.DirectionalLight(0x200808, 0.3);
+  fill.position.set(-20, 10, 20);
+  scene.add(fill);
+}
+
+// ─── TERRAIN ─────────────────────────────────────────────────────────────────
+function buildTerrain() {
+  const W = 120, D = 120, SX = 80, SZ = 80;
+  const geo = new THREE.PlaneGeometry(W, D, SX, SZ);
+  const pos = geo.attributes.position;
+
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), z = pos.getZ(i);
+    let h = 0;
+    h += fbm(x * 0.04, z * 0.04) * 2.5;
+    h += fbm(x * 0.12, z * 0.12) * 0.8;
+    h += fbm(x * 0.35, z * 0.35) * 0.25;
+    pos.setY(i, h);
+  }
+  geo.computeVertexNormals();
+
+  // Vertex coloring
+  const colors = [];
+  for (let i = 0; i < pos.count; i++) {
+    const h = pos.getY(i);
+    const t = (h + 2.5) / 5.0;
+    const r = THREE.MathUtils.lerp(0.45, 0.72, t);
+    const g = THREE.MathUtils.lerp(0.20, 0.38, t);
+    const b = THREE.MathUtils.lerp(0.10, 0.18, t);
+    colors.push(r, g, b);
+  }
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+
+  const mat = new THREE.MeshStandardMaterial({
+    vertexColors: true, roughness: 0.95, metalness: 0.05
+  });
+  terrainMesh = new THREE.Mesh(geo, mat);
+  terrainMesh.rotation.x = -Math.PI / 2;
+  terrainMesh.receiveShadow = true;
+  scene.add(terrainMesh);
+
+  // Scatter boulders
+  for (let i = 0; i < 60; i++) {
+    const bx = (Math.random() - .5) * 100;
+    const bz = (Math.random() - .5) * 100;
+    if (Math.abs(bx) < 8 && Math.abs(bz) < 8) continue;
+    const size = 0.3 + Math.random() * 1.5;
+    const bg = new THREE.DodecahedronGeometry(size, 0);
+    perturbGeo(bg, size * 0.3);
+    const bm = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(0.52 + Math.random()*.1, 0.27 + Math.random()*.05, 0.14),
+      roughness: 0.9
+    });
+    const b = new THREE.Mesh(bg, bm);
+    b.position.set(bx, getTerrainY(bx, bz) + size * 0.4, bz);
+    b.rotation.set(Math.random()*Math.PI, Math.random()*Math.PI, Math.random()*Math.PI);
+    b.castShadow = b.receiveShadow = true;
+    scene.add(b);
+  }
+}
+
+function perturbGeo(geo, amt) {
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    pos.setXYZ(i,
+      pos.getX(i) + (Math.random()-.5)*amt,
+      pos.getY(i) + (Math.random()-.5)*amt,
+      pos.getZ(i) + (Math.random()-.5)*amt
+    );
+  }
+  geo.computeVertexNormals();
+}
+
+function fbm(x, z) {
+  let v = 0, a = 0.5;
+  for (let o = 0; o < 4; o++) {
+    const f = Math.pow(2, o);
+    v += a * (Math.sin(x * f * 1.7 + 3.1) * Math.cos(z * f * 1.3 + 1.7) +
+              Math.cos(x * f * 0.9 - 2.3) * Math.sin(z * f * 2.1 + 0.5));
+    a *= 0.5;
+  }
+  return v;
+}
+
+function getTerrainY(x, z) {
+  let h = 0;
+  h += fbm(x * 0.04, z * 0.04) * 2.5;
+  h += fbm(x * 0.12, z * 0.12) * 0.8;
+  h += fbm(x * 0.35, z * 0.35) * 0.25;
+  return h;
+}
+
+// ─── DUST ────────────────────────────────────────────────────────────────────
+function buildDust() {
+  const N = 1500;
+  const geo = new THREE.BufferGeometry();
+  const verts = new Float32Array(N * 3);
+  for (let i = 0; i < N; i++) {
+    verts[i*3]   = (Math.random()-.5)*80;
+    verts[i*3+1] = Math.random()*8 + 0.5;
+    verts[i*3+2] = (Math.random()-.5)*80;
+  }
+  geo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
+  const mat = new THREE.PointsMaterial({
+    color: 0xcc7744, size: 0.06, transparent: true, opacity: 0.35
+  });
+  dustParticles = new THREE.Points(geo, mat);
+  scene.add(dustParticles);
+}
+
+// ─── ROVER ───────────────────────────────────────────────────────────────────
+function buildRover() {
+  roverGroup = new THREE.Group();
+  scene.add(roverGroup);
+
+  // Chassis
+  const chassisMat = new THREE.MeshStandardMaterial({ color: 0xb0a080, roughness: 0.7, metalness: 0.3 });
+  const chassisGeo = new THREE.BoxGeometry(2.4, 0.3, 1.6);
+  const chassis = new THREE.Mesh(chassisGeo, chassisMat);
+  chassis.castShadow = true;
+  roverGroup.add(chassis);
+
+  // Equipment deck
+  const deckMat = new THREE.MeshStandardMaterial({ color: 0x888870, roughness: 0.6 });
+  const deck = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.08, 1.2), deckMat);
+  deck.position.y = 0.19;
+  roverGroup.add(deck);
+
+  // Solar panels
+  const solarMat = new THREE.MeshStandardMaterial({ color: 0x112244, roughness: 0.3, metalness: 0.6 });
+  [-0.75, 0.75].forEach(ox => {
+    const panel = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.05, 0.8), solarMat);
+    panel.position.set(ox, 0.28, 0);
+    roverGroup.add(panel);
+  });
+
+  // RTG power unit (back)
+  const rtgMat = new THREE.MeshStandardMaterial({ color: 0x444444, roughness: 0.5, metalness: 0.5 });
+  const rtg = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.5, 8), rtgMat);
+  rtg.position.set(-1.1, 0.2, 0);
+  rtg.rotation.z = Math.PI / 2;
+  roverGroup.add(rtg);
+
+  // Mast with cameras
+  const mastMat = new THREE.MeshStandardMaterial({ color: 0x999980, roughness: 0.6 });
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 0.7, 8), mastMat);
+  mast.position.set(0.6, 0.5, 0);
+  roverGroup.add(mast);
+  const mastHead = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.12, 0.12), mastMat);
+  mastHead.position.set(0.6, 0.88, 0);
+  roverGroup.add(mastHead);
+
+  // 6 wheels (rocker-bogie)
+  const wheelPositions = [
+    { x:  0.9, y:-0.22, z:  0.95 }, { x:  0.9, y:-0.22, z: -0.95 },
+    { x:  0.1, y:-0.20, z:  1.00 }, { x:  0.1, y:-0.20, z: -1.00 },
+    { x: -0.9, y:-0.22, z:  0.95 }, { x: -0.9, y:-0.22, z: -0.95 },
+  ];
+  const wheelMat = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.9, metalness: 0.1 });
+  const tireMat  = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 1.0 });
+  wheelPositions.forEach((wp, i) => {
+    const wheelGroup = new THREE.Group();
+    wheelGroup.position.set(wp.x, wp.y, wp.z);
+    wheelGroup.rotation.z = Math.PI / 2;
+
+    // Rim (hexagonal)
+    const rimGeo = new THREE.CylinderGeometry(0.28, 0.28, 0.08, 6, 1, false);
+    const rim = new THREE.Mesh(rimGeo, wheelMat);
+    wheelGroup.add(rim);
+
+    // Hub spokes
+    const hubGeo = new THREE.CylinderGeometry(0.07, 0.07, 0.10, 6);
+    const hub = new THREE.Mesh(hubGeo, new THREE.MeshStandardMaterial({ color:0x888888, metalness:0.8 }));
+    wheelGroup.add(hub);
+    for (let s = 0; s < 6; s++) {
+      const a = s * Math.PI / 3;
+      const spokeGeo = new THREE.BoxGeometry(0.04, 0.04, 0.22);
+      const spoke = new THREE.Mesh(spokeGeo, wheelMat);
+      spoke.position.set(Math.cos(a)*0.12, 0, Math.sin(a)*0.12);
+      spoke.rotation.y = a;
+      wheelGroup.add(spoke);
+    }
+
+    // Tread (chevron grouser segments)
+    for (let t = 0; t < 12; t++) {
+      const a = t * Math.PI / 6;
+      const seg = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.04, 0.16), tireMat);
+      seg.position.set(0, Math.cos(a)*0.29, Math.sin(a)*0.29);
+      seg.rotation.x = a;
+      wheelGroup.add(seg);
+    }
+
+    roverGroup.add(wheelGroup);
+  });
+
+  // Sample tray (flat on chassis)
+  const trayMat = new THREE.MeshStandardMaterial({ color: 0x555544, roughness: 0.7 });
+  const tray = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.05, 0.8), trayMat);
+  tray.position.set(-0.3, 0.2, 0);
+  roverGroup.add(tray);
+
+  roverGroup.position.copy(roverPos);
+}
+
+// ─── ARM ─────────────────────────────────────────────────────────────────────
+function buildArm() {
+  armGroup = new THREE.Group();
+  armGroup.position.set(1.0, 0.22, 0);
+  roverGroup.add(armGroup);
+
+  const armMat = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.5, metalness: 0.6 });
+  const jMat   = new THREE.MeshStandardMaterial({ color: 0x444466, roughness: 0.4, metalness: 0.7 });
+
+  // J1 base yaw platform
+  const j1 = new THREE.Group();
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 0.12, 12), jMat);
+  j1.add(base);
+  armGroup.add(j1);
+  jointMeshes.j1 = j1;
+
+  // J2 shoulder
+  const j2 = new THREE.Group();
+  j2.position.y = 0.12;
+  const link2 = buildLink(0.55, armMat);
+  link2.position.y = 0.275;
+  j2.add(link2);
+  j1.add(j2);
+  jointMeshes.j2 = j2;
+
+  // J3 elbow
+  const j3 = new THREE.Group();
+  j3.position.y = 0.55;
+  const link3 = buildLink(0.45, armMat);
+  link3.position.y = 0.225;
+  j3.add(link3);
+  const j3joint = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 8), jMat);
+  j3.add(j3joint);
+  j2.add(j3);
+  jointMeshes.j3 = j3;
+
+  // J4 wrist roll
+  const j4 = new THREE.Group();
+  j4.position.y = 0.45;
+  const link4 = buildLink(0.30, armMat);
+  link4.position.y = 0.15;
+  j4.add(link4);
+  j3.add(j4);
+  jointMeshes.j4 = j4;
+
+  // J5 wrist pitch
+  const j5 = new THREE.Group();
+  j5.position.y = 0.30;
+  j4.add(j5);
+  jointMeshes.j5 = j5;
+
+  // J6 wrist yaw
+  const j6 = new THREE.Group();
+  j5.add(j6);
+  jointMeshes.j6 = j6;
+
+  // End-effector / gripper (J7)
+  const j7 = new THREE.Group();
+  j7.position.y = 0.05;
+  j6.add(j7);
+  jointMeshes.j7 = j7;
+
+  buildEndEffector(j7);
+}
+
+function buildLink(length, mat) {
+  const g = new THREE.Group();
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, length, 8), mat);
+  g.add(shaft);
+  const endCap = new THREE.Mesh(new THREE.SphereGeometry(0.055, 8, 8), mat);
+  endCap.position.y = length / 2;
+  g.add(endCap);
+  return g;
+}
+
+function buildEndEffector(parent) {
+  const eeMat = new THREE.MeshStandardMaterial({ color: 0x777788, roughness: 0.4, metalness: 0.6 });
+  const fingerMat = new THREE.MeshStandardMaterial({ color: 0x888899, roughness: 0.5, metalness: 0.5 });
+  const copperMat = new THREE.MeshStandardMaterial({ color: 0xbb7744, roughness: 0.3, metalness: 0.7 });
+  const sensorMat = new THREE.MeshStandardMaterial({ color: 0x00ffcc, emissive: 0x00ffcc, emissiveIntensity: 0.5 });
+  const camMat    = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.2, metalness: 0.8 });
+  const laserMat  = new THREE.MeshStandardMaterial({ color: 0xff0000, emissive: 0xff0000, emissiveIntensity: 0.8 });
+
+  // Palm
+  const palm = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.08, 0.14), eeMat);
+  palm.position.y = 0.1;
+  parent.add(palm);
+
+  // Camera dome on palm
+  const camDome = new THREE.Mesh(new THREE.SphereGeometry(0.04, 8, 8), camMat);
+  camDome.position.set(0, 0.15, 0.07);
+  parent.add(camDome);
+
+  // LIBS laser nozzle
+  const laser = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.06, 6), laserMat);
+  laser.position.set(0.04, 0.15, 0.07);
+  laser.rotation.x = Math.PI / 2;
+  parent.add(laser);
+
+  // Two tapered fingers — references stored on the group for reliable retrieval
+  const gripperFingers = [];
+  [-0.055, 0.055].forEach(ox => {
+    const finger = new THREE.Group();
+    finger.position.set(ox, 0.14, 0);
+    const prox = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.12, 0.04), fingerMat);
+    prox.position.y = 0.06;
+    finger.add(prox);
+    const dist = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.10, 0.035), fingerMat);
+    dist.position.y = 0.17;
+    finger.add(dist);
+    // Copper gripping face
+    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.032, 0.08, 0.005), copperMat);
+    grip.position.set(ox < 0 ? 0.018 : -0.018, 0.17, 0);
+    finger.add(grip);
+    // Touch sensor
+    const sensor = new THREE.Mesh(new THREE.SphereGeometry(0.012, 6, 6), sensorMat);
+    sensor.position.set(ox < 0 ? 0.022 : -0.022, 0.21, 0);
+    finger.add(sensor);
+    parent.add(finger);
+    gripperFingers.push(finger);
+  });
+  // Attach finger references so applyJoints() can find them without relying on child index
+  parent.userData.fingers = gripperFingers;
+}
+
+// ─── ROCKS / SAMPLES ─────────────────────────────────────────────────────────
+function spawnRocks() {
+  // Clear old
+  sampleRocks.forEach(r => scene.remove(r.mesh));
+  sampleRocks = [];
+
+  for (let i = 0; i < MAX_SAMPLES; i++) {
+    let px, pz;
+    do {
+      px = (Math.random() - .5) * 40;
+      pz = (Math.random() - .5) * 40;
+    } while (Math.sqrt(px*px + pz*pz) < 5);
+
+    const mineral = MINERALS[i % MINERALS.length];
+    const size = 0.12 + Math.random() * 0.18;
+    const geo = new THREE.DodecahedronGeometry(size, 0);
+    perturbGeo(geo, size * 0.4);
+    const mat = new THREE.MeshStandardMaterial({
+      color: mineral.color, roughness: 0.85, metalness: 0.1
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    const py = getTerrainY(px, pz) + size * 0.5;
+    mesh.position.set(px, py, pz);
+    mesh.castShadow = true;
+    scene.add(mesh);
+
+    // Glow ring
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(size * 1.2, size * 1.4, 12),
+      new THREE.MeshBasicMaterial({ color: 0x00ffcc, transparent: true, opacity: 0.0, side: THREE.DoubleSide })
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(px, py - size * 0.4, pz);
+    scene.add(ring);
+
+    // Stable mini-cam screen position (computed once at spawn, not per-frame)
+    const camOffX = (Math.random() - 0.5) * 60;
+    const camOffY = (Math.random() - 0.5) * 40;
+
+    sampleRocks.push({ mesh, ring, mineral, collected: false, px, pz, camOffX, camOffY });
+  }
+}
+
+// ─── TRAY ─────────────────────────────────────────────────────────────────────
+function buildTray() {
+  traySlots = [];
+  updateTrayUI();
+}
+
+function addToTray(mineral) {
+  traySlots.push(mineral);
+  samplesCollected++;
+  updateTrayUI();
+
+  // Visual sample nugget in tray
+  const ng = new THREE.Mesh(
+    new THREE.SphereGeometry(0.05, 6, 6),
+    new THREE.MeshStandardMaterial({ color: mineral.color })
+  );
+  const row = Math.floor((traySlots.length - 1) / 4);
+  const col = (traySlots.length - 1) % 4;
+  ng.position.set(
+    roverGroup.position.x - 0.3 + (col - 1.5) * 0.18,
+    roverGroup.position.y + 0.24,
+    roverGroup.position.z + (row - 0.5) * 0.22
+  );
+  scene.add(ng);
+}
+
+function updateTrayUI() {
+  const list = document.getElementById('tray-list');
+  if (traySlots.length === 0) {
+    list.innerHTML = '<div style="color:#555">— EMPTY —</div>';
+  } else {
+    list.innerHTML = traySlots.map((m, i) =>
+      `<div class="tray-row"><span class="mineral-tag">#${i+1} ${m.name}</span><span class="mass-tag">${m.mass}g</span></div>`
+    ).join('');
+  }
+  const total = traySlots.reduce((s, m) => s + m.mass, 0);
+  document.getElementById('total-mass').textContent = total.toFixed(1) + ' g';
+  document.getElementById('slots-used').textContent = traySlots.length + ' / ' + MAX_SAMPLES;
+  document.getElementById('status-samples').textContent = 'SAMPLES: ' + samplesCollected + '/' + MAX_SAMPLES;
+}
+
+// ─── JOINT UI ─────────────────────────────────────────────────────────────────
+function buildJointUI() {
+  const container = document.getElementById('joint-list');
+  const names = ['J1 BASE YAW','J2 SHOULDER','J3 ELBOW','J4 WRIST ROLL','J5 WRIST PITCH','J6 WRIST YAW','J7 GRIPPER'];
+  container.innerHTML = names.map((n, i) => `
+    <div style="font-size:10px;color:#ff9944">${n}</div>
+    <div class="joint-bar"><div class="joint-bar-fill" id="jbar${i+1}" style="width:30%"></div></div>
+  `).join('');
+}
+
+function updateJointUI() {
+  const vals = [joints.j1, joints.j2, joints.j3, joints.j4, joints.j5, joints.j6, joints.j7];
+  vals.forEach((v, i) => {
+    const bar = document.getElementById('jbar' + (i+1));
+    if (bar) bar.style.width = ((v + Math.PI) / (2 * Math.PI) * 100).toFixed(1) + '%';
+  });
+}
+
+// ─── SPECTROMETER UI ─────────────────────────────────────────────────────────
+const specCtx = document.getElementById('spec-canvas').getContext('2d');
+
+function drawSpectrometer(mineral) {
+  specCtx.clearRect(0, 0, 220, 80);
+  specCtx.fillStyle = 'rgba(0,0,0,0.0)';
+  specCtx.fillRect(0, 0, 220, 80);
+
+  if (!mineral) {
+    specCtx.fillStyle = '#333';
+    specCtx.fillRect(0, 0, 220, 80);
+    return;
+  }
+
+  specCtx.fillStyle = '#0a0005';
+  specCtx.fillRect(0, 0, 220, 80);
+
+  // Grid
+  specCtx.strokeStyle = '#ff6a0022';
+  specCtx.lineWidth = 0.5;
+  for (let x = 0; x < 220; x += 27.5) {
+    specCtx.beginPath(); specCtx.moveTo(x, 0); specCtx.lineTo(x, 80); specCtx.stroke();
+  }
+  for (let y = 0; y < 80; y += 20) {
+    specCtx.beginPath(); specCtx.moveTo(0, y); specCtx.lineTo(220, y); specCtx.stroke();
+  }
+
+  // Spectrum curve
+  const bands = mineral.bands;
+  specCtx.beginPath();
+  bands.forEach((b, i) => {
+    const x = (i / (bands.length - 1)) * 210 + 5;
+    const y = 70 - b * 55;
+    i === 0 ? specCtx.moveTo(x, y) : specCtx.lineTo(x, y);
+  });
+  specCtx.strokeStyle = '#00ffcc';
+  specCtx.lineWidth = 1.5;
+  specCtx.stroke();
+
+  // Fill
+  specCtx.lineTo(215, 75);
+  specCtx.lineTo(5, 75);
+  specCtx.closePath();
+  specCtx.fillStyle = 'rgba(0,255,200,0.08)';
+  specCtx.fill();
+
+  // Confidence bar width: conf (0-1) mapped to max 110 px of the 220 px canvas
+  specCtx.fillStyle = '#ff6a00';
+  specCtx.fillRect(5, 5, mineral.conf * 110, 4);
+
+  // Labels
+  specCtx.fillStyle = '#ffcc00';
+  specCtx.font = '8px Courier New';
+  specCtx.fillText('400nm', 3, 78);
+  specCtx.fillText('2500nm', 180, 78);
+  specCtx.fillText('CONF:' + (mineral.conf * 100).toFixed(0) + '%', 160, 14);
+
+  document.getElementById('spec-mineral').textContent = mineral.name.toUpperCase();
+}
+
+// ─── MINI-CAM (EE view) ───────────────────────────────────────────────────────
+const miniCtx = document.getElementById('mini-canvas').getContext('2d');
+
+function drawMiniCam() {
+  miniCtx.fillStyle = '#0a0a0a';
+  miniCtx.fillRect(0, 0, 200, 150);
+
+  // Mars horizon gradient
+  const grad = miniCtx.createLinearGradient(0, 0, 0, 150);
+  grad.addColorStop(0, '#3d1a08');
+  grad.addColorStop(0.55, '#cc6633');
+  grad.addColorStop(1, '#8b4513');
+  miniCtx.fillStyle = grad;
+  miniCtx.fillRect(0, 0, 200, 150);
+
+  // Detected rocks
+  sampleRocks.forEach(r => {
+    if (r.collected) return;
+    const eePos = getEEWorldPosition();
+    const dist = eePos.distanceTo(r.mesh.position);
+    if (dist > 8) return;
+
+    const screenX = 100 + r.camOffX * (dist > 4 ? 1 : 2);
+    const screenY = 80 + r.camOffY;
+    const sz = Math.max(4, 18 - dist * 1.5);
+
+    miniCtx.strokeStyle = '#00ffcc';
+    miniCtx.lineWidth = 1;
+    miniCtx.strokeRect(screenX - sz, screenY - sz, sz*2, sz*2);
+
+    // Corner marks
+    [[screenX-sz, screenY-sz],[screenX+sz, screenY-sz],
+     [screenX-sz, screenY+sz],[screenX+sz, screenY+sz]].forEach(([cx, cy]) => {
+      miniCtx.strokeStyle = '#ffcc00';
+      miniCtx.lineWidth = 1.5;
+      miniCtx.beginPath();
+      miniCtx.moveTo(cx, cy); miniCtx.lineTo(cx + (cx < 100 ? 4 : -4), cy);
+      miniCtx.moveTo(cx, cy); miniCtx.lineTo(cx, cy + (cy < 75 ? 4 : -4));
+      miniCtx.stroke();
+    });
+
+    miniCtx.fillStyle = '#00ffcc';
+    miniCtx.font = '7px Courier New';
+    miniCtx.fillText(r.mineral.name.substring(0, 4).toUpperCase(), screenX - sz, screenY - sz - 2);
+    miniCtx.fillText(dist.toFixed(1)+'m', screenX - sz, screenY + sz + 9);
+  });
+
+  // Crosshair
+  miniCtx.strokeStyle = 'rgba(255,106,0,0.6)';
+  miniCtx.lineWidth = 1;
+  miniCtx.beginPath();
+  miniCtx.moveTo(95, 75); miniCtx.lineTo(105, 75);
+  miniCtx.moveTo(100, 70); miniCtx.lineTo(100, 80);
+  miniCtx.stroke();
+  miniCtx.strokeRect(94, 69, 12, 12);
+
+  // Scan-line sweep
+  const t = Date.now() * 0.001;
+  const scanY = ((Math.sin(t * 0.7) + 1) / 2) * 140 + 5;
+  miniCtx.fillStyle = 'rgba(0,255,200,0.06)';
+  miniCtx.fillRect(0, scanY, 200, 2);
+}
+
+function getEEWorldPosition() {
+  const v = new THREE.Vector3();
+  if (jointMeshes.j7) jointMeshes.j7.getWorldPosition(v);
+  return v;
+}
+
+// ─── AUTONOMOUS FSM ───────────────────────────────────────────────────────────
+function updateFSM(dt) {
+  if (!autonomous || missionComplete) return;
+
+  fsmTimer += dt;
+
+  switch (fsmState) {
+    case FSM.ROAM: {
+      // Find nearest uncollected rock
+      const nearest = getNearestRock();
+      if (!nearest) { missionComplete = true; showMissionComplete(); return; }
+
+      // Move toward rock
+      const dx = nearest.mesh.position.x - roverPos.x;
+      const dz = nearest.mesh.position.z - roverPos.z;
+      const dist = Math.sqrt(dx*dx + dz*dz);
+
+      if (dist > 3.5) {
+        const targetYaw = Math.atan2(dx, dz);
+        roverYaw += (targetYaw - roverYaw) * dt * 2.5;
+        roverSpeed = 1.8;
+        nearest.ring.material.opacity = Math.sin(Date.now() * 0.004) * 0.3 + 0.15;
+      } else {
+        roverSpeed = 0;
+        targetRock = nearest;
+        setFSM(FSM.APPROACH);
+      }
+      break;
+    }
+    case FSM.APPROACH: {
+      if (!targetRock || targetRock.collected) { setFSM(FSM.ROAM); break; }
+      const dx = targetRock.mesh.position.x - roverPos.x;
+      const dz = targetRock.mesh.position.z - roverPos.z;
+      const dist = Math.sqrt(dx*dx + dz*dz);
+      if (dist > 1.8) {
+        const targetYaw = Math.atan2(dx, dz);
+        roverYaw += (targetYaw - roverYaw) * dt * 3;
+        roverSpeed = 0.8;
+      } else {
+        roverSpeed = 0;
+        setFSM(FSM.DEPLOY);
+      }
+      break;
+    }
+    case FSM.DEPLOY: {
+      // Extend arm toward rock
+      const tgt = targetRock ? targetRock.mesh.position : roverPos.clone().add(new THREE.Vector3(1.5, 0, 0));
+      const local = roverGroup.worldToLocal(tgt.clone());
+      const targetJ1 = Math.atan2(local.z, local.x);
+      const dist = local.length();
+      const targetJ2 = -Math.min(0.8, Math.max(-0.1, (dist - 1.0) * 0.5));
+      const targetJ3 = 0.6 + (dist - 1.0) * 0.2;
+
+      joints.j1 += (targetJ1 - joints.j1) * dt * 2;
+      joints.j2 += (targetJ2 - joints.j2) * dt * 2;
+      joints.j3 += (targetJ3 - joints.j3) * dt * 2;
+      joints.j5 += (-0.4 - joints.j5) * dt * 2;
+      joints.j7 += (0.8 - joints.j7) * dt * 3; // open gripper
+
+      if (fsmTimer > 2.0) {
+        scanActive = true;
+        document.getElementById('scan-ring').classList.add('visible');
+        setFSM(FSM.ANALYZE);
+      }
+      break;
+    }
+    case FSM.ANALYZE: {
+      currentMineral = targetRock ? targetRock.mineral : null;
+      drawSpectrometer(currentMineral);
+      if (fsmTimer > 2.5) {
+        scanActive = false;
+        document.getElementById('scan-ring').classList.remove('visible');
+        setFSM(FSM.GRIP);
+      }
+      break;
+    }
+    case FSM.GRIP: {
+      // Close gripper
+      joints.j7 += (-0.1 - joints.j7) * dt * 3;
+      if (fsmTimer > 1.5) {
+        // Collect
+        if (targetRock && !targetRock.collected) {
+          targetRock.collected = true;
+          scene.remove(targetRock.mesh);
+          scene.remove(targetRock.ring);
+          addToTray(targetRock.mineral);
+        }
+        setFSM(FSM.STOW);
+      }
+      break;
+    }
+    case FSM.STOW: {
+      // Retract arm
+      joints.j2 += (0.2 - joints.j2) * dt * 2;
+      joints.j3 += (0.6 - joints.j3) * dt * 2;
+      joints.j5 += (0.3 - joints.j5) * dt * 2;
+      joints.j1 += (0.0 - joints.j1) * dt * 1.5;
+      joints.j7 += (0.3 - joints.j7) * dt * 2;
+      drawSpectrometer(null);
+      document.getElementById('spec-mineral').textContent = 'IDLE';
+      if (fsmTimer > 2.0) {
+        targetRock = null;
+        setFSM(FSM.RESUME);
+      }
+      break;
+    }
+    case FSM.RESUME: {
+      if (fsmTimer > 0.5) setFSM(FSM.ROAM);
+      break;
+    }
+  }
+
+  applyJoints();
+}
+
+function setFSM(state) {
+  fsmState = state;
+  fsmTimer = 0;
+  document.getElementById('status-fsm').textContent = state;
+  const el = document.getElementById('status-fsm');
+  el.className = (state === FSM.ROAM || state === FSM.RESUME) ? 'status-ok' : 'status-active';
+}
+
+function getNearestRock() {
+  let nearest = null, minDist = Infinity;
+  sampleRocks.forEach(r => {
+    if (r.collected) return;
+    const d = roverPos.distanceTo(r.mesh.position);
+    if (d < minDist) { minDist = d; nearest = r; }
+  });
+  return nearest;
+}
+
+// ─── APPLY JOINTS ─────────────────────────────────────────────────────────────
+function applyJoints() {
+  if (jointMeshes.j1) jointMeshes.j1.rotation.y = joints.j1;
+  if (jointMeshes.j2) jointMeshes.j2.rotation.z = joints.j2;
+  if (jointMeshes.j3) jointMeshes.j3.rotation.z = joints.j3;
+  if (jointMeshes.j4) jointMeshes.j4.rotation.y = joints.j4;
+  if (jointMeshes.j5) jointMeshes.j5.rotation.z = joints.j5;
+  if (jointMeshes.j6) jointMeshes.j6.rotation.y = joints.j6;
+  if (jointMeshes.j7) {
+    // Gripper open/close — use stored userData.fingers set during construction
+    const open = joints.j7;
+    const fingers = jointMeshes.j7.userData.fingers;
+    if (fingers && fingers.length >= 2) {
+      fingers[0].position.x = -0.055 - open * 0.08;
+      fingers[1].position.x =  0.055 + open * 0.08;
+    }
+  }
+  updateJointUI();
+}
+
+// ─── ROVER MOVEMENT ──────────────────────────────────────────────────────────
+function updateRover(dt) {
+  if (roverSpeed > 0) {
+    const moveX = Math.sin(roverYaw) * roverSpeed * dt;
+    const moveZ = Math.cos(roverYaw) * roverSpeed * dt;
+    roverPos.x += moveX;
+    roverPos.z += moveZ;
+    roverPos.y = getTerrainY(roverPos.x, roverPos.z) + 0.4;
+    roverGroup.position.copy(roverPos);
+    roverGroup.rotation.y = roverYaw;
+
+    // Spin wheels
+    roverGroup.children.forEach(c => {
+      if (c.isGroup && c.children.length > 2) {
+        c.rotation.x += roverSpeed * dt * 2.5;
+      }
+    });
+  }
+  document.getElementById('status-target').textContent =
+    targetRock ? `TARGET: ${targetRock.mineral.name.substring(0, TARGET_NAME_MAX_LEN).toUpperCase()}` : 'TARGET: SCANNING';
+}
+
+// ─── DUST ANIMATION ──────────────────────────────────────────────────────────
+function updateDust(dt) {
+  const pos = dustParticles.geometry.attributes.position;
+  const t = Date.now() * 0.0002;
+  for (let i = 0; i < pos.count; i++) {
+    pos.setX(i, pos.getX(i) + Math.sin(t + i) * 0.004 * dt * 60);
+    let y = pos.getY(i);
+    y -= 0.003 * dt * 60;
+    if (y < 0.2) y = Math.random() * 8 + 1;
+    pos.setY(i, y);
+    pos.setZ(i, pos.getZ(i) + Math.cos(t * 0.7 + i) * 0.003 * dt * 60);
+  }
+  pos.needsUpdate = true;
+}
+
+// ─── CAMERA ──────────────────────────────────────────────────────────────────
+function updateCamera() {
+  document.getElementById('cam-label').textContent = CAM_NAMES[cameraMode];
+
+  switch (cameraMode) {
+    case 0: { // ORBIT
+      const x = orbitRadius * Math.sin(orbitTheta) * Math.sin(orbitPhi);
+      const y = orbitRadius * Math.cos(orbitPhi);
+      const z = orbitRadius * Math.cos(orbitTheta) * Math.sin(orbitPhi);
+      camera.position.lerp(new THREE.Vector3(
+        orbitTarget.x + x, orbitTarget.y + y, orbitTarget.z + z
+      ), 0.1);
+      camera.lookAt(orbitTarget);
+      break;
+    }
+    case 1: { // CHASE
+      const behind = new THREE.Vector3(
+        roverPos.x - Math.sin(roverYaw) * 7,
+        roverPos.y + 3.5,
+        roverPos.z - Math.cos(roverYaw) * 7
+      );
+      camera.position.lerp(behind, 0.06);
+      camera.lookAt(roverPos.x, roverPos.y + 0.5, roverPos.z);
+      break;
+    }
+    case 2: { // ARM
+      const eePos = getEEWorldPosition();
+      const armCamPos = eePos.clone().add(new THREE.Vector3(0, 0.6, -0.4));
+      camera.position.lerp(armCamPos, 0.08);
+      camera.lookAt(eePos);
+      break;
+    }
+    case 3: { // TOP
+      camera.position.lerp(new THREE.Vector3(roverPos.x, roverPos.y + 20, roverPos.z + 2), 0.05);
+      camera.lookAt(roverPos.x, roverPos.y, roverPos.z);
+      break;
+    }
+    case 4: { // COLLECTED view - overview of tray
+      const trayPos = new THREE.Vector3(roverPos.x - 0.3, roverPos.y, roverPos.z);
+      camera.position.lerp(new THREE.Vector3(trayPos.x, trayPos.y + 2.5, trayPos.z + 2), 0.06);
+      camera.lookAt(trayPos.x, trayPos.y + 0.2, trayPos.z);
+      break;
+    }
+  }
+}
+
+// ─── ORBIT CONTROLS ──────────────────────────────────────────────────────────
+function onMouseDown(e) {
+  if (cameraMode !== 0) return;
+  isDragging = true;
+  lastMX = e.clientX;
+  lastMY = e.clientY;
+}
+
+function onMouseMove(e) {
+  if (!isDragging || cameraMode !== 0) return;
+  const dx = e.clientX - lastMX;
+  const dy = e.clientY - lastMY;
+  orbitTheta -= dx * 0.005;
+  orbitPhi   = Math.max(0.15, Math.min(Math.PI * 0.48, orbitPhi + dy * 0.005));
+  lastMX = e.clientX;
+  lastMY = e.clientY;
+}
+
+function onWheel(e) {
+  if (cameraMode !== 0) return;
+  orbitRadius = Math.max(5, Math.min(60, orbitRadius + e.deltaY * 0.015));
+}
+
+// ─── MISSION CONTROLS ────────────────────────────────────────────────────────
+function toggleAuto() {
+  autonomous = !autonomous;
+  const btn = document.getElementById('btn-auto');
+  btn.classList.toggle('active', autonomous);
+  btn.textContent = autonomous ? '⬢ AUTONOMOUS: ON' : '⬢ AUTONOMOUS';
+  if (autonomous && fsmState === FSM.ROAM) roverSpeed = 1.8;
+  if (!autonomous) roverSpeed = 0;
+}
+
+function cycleView() {
+  cameraMode = (cameraMode + 1) % 5;
+}
+
+function resetMission() {
+  autonomous = false;
+  document.getElementById('btn-auto').classList.remove('active');
+  document.getElementById('btn-auto').textContent = '⬢ AUTONOMOUS';
+  fsmState = FSM.ROAM; fsmTimer = 0;
+  roverPos.set(0, 0.4, 0);
+  roverYaw = 0; roverSpeed = 0;
+  roverGroup.position.copy(roverPos);
+  roverGroup.rotation.y = 0;
+  joints = { j1:0, j2:0.2, j3:0.6, j4:0, j5:0.3, j6:0, j7:0 };
+  traySlots = []; samplesCollected = 0; missionTime = 0;
+  battery = 98; missionComplete = false; targetRock = null;
+  document.getElementById('overlay-msg').style.display = 'none';
+  document.getElementById('status-fsm').textContent = 'ROAM';
+  document.getElementById('status-fsm').className = 'status-ok';
+  document.getElementById('scan-ring').classList.remove('visible');
+  drawSpectrometer(null);
+  updateTrayUI();
+  spawnRocks();
+  applyJoints();
+}
+
+function showMissionComplete() {
+  document.getElementById('overlay-msg').style.display = 'block';
+  document.getElementById('overlay-title').textContent = 'MISSION COMPLETE';
+  const total = traySlots.reduce((s, m) => s + m.mass, 0);
+  document.getElementById('overlay-sub').textContent =
+    `ALL ${samplesCollected} SAMPLES COLLECTED  •  TOTAL MASS: ${total.toFixed(1)}g`;
+  setTimeout(() => document.getElementById('overlay-msg').style.display = 'none', 5000);
+}
+
+// ─── HUD UPDATE ──────────────────────────────────────────────────────────────
+function updateHUD(dt) {
+  missionTime += dt;
+  battery = Math.max(0, battery - dt * BATTERY_DRAIN_RATE);
+  const h = Math.floor(missionTime / 3600);
+  const m = Math.floor((missionTime % 3600) / 60);
+  const s = Math.floor(missionTime % 60);
+  document.getElementById('mission-time').textContent =
+    `MET: ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+  const battEl = document.getElementById('status-battery');
+  battEl.textContent = `BATTERY: ${battery.toFixed(0)}%`;
+  battEl.className = battery > 50 ? 'status-ok' : battery > 20 ? 'status-warn' : 'status-active';
+}
+
+// ─── RESIZE ──────────────────────────────────────────────────────────────────
+function onResize() {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+// ─── ANIMATE ─────────────────────────────────────────────────────────────────
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.05);
+
+  updateHUD(dt);
+  updateFSM(dt);
+  updateRover(dt);
+  updateDust(dt);
+  updateCamera();
+  drawMiniCam();
+
+  // Idle arm sway when not autonomous
+  if (!autonomous) {
+    const t = Date.now() * 0.001;
+    joints.j1 += (Math.sin(t * 0.3) * 0.05 - joints.j1) * dt * 0.3;
+    joints.j2 += (0.2 + Math.sin(t * 0.2) * 0.02 - joints.j2) * dt * 0.3;
+    applyJoints();
+  }
+
+  // Rock glow pulse
+  sampleRocks.forEach(r => {
+    if (!r.collected && r.ring) {
+      r.ring.material.opacity = Math.sin(Date.now() * 0.003 + r.px) * 0.1 + 0.08;
+    }
+  });
+
+  renderer.render(scene, camera);
+}
+
+// ─── BOOT ─────────────────────────────────────────────────────────────────────
+init();
+</script>
+</body>
+</html>
