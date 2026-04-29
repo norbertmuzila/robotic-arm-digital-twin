@@ -1252,9 +1252,10 @@ function updateGripStatus(){
 // Default mode aims the wrist AT the target.
 // topDown mode (used for picking and stowing) puts the wrist GRIPPER_REACH above the
 // target and pitches J5 strongly down so the fingertips land on the target.
-const GRIPPER_REACH = 0.36; // metres from J5 axis to fingertip when J5 fully down
-// (J5 housing 0.06 + J6 housing 0.055 + gripper base 0.03 + finger length 0.30 ≈ 0.45;
-//  but the fingertip touch point projects vertically a bit less due to finger angle.)
+const GRIPPER_REACH = 0.28; // metres from J5 axis to fingertip when J5 fully down
+// Reduced so fingertips actually reach and touch the ground/rock surface.
+// (J5 housing 0.06 + J6 housing 0.055 + gripper base 0.03 + finger length 0.30,
+//  minus projection offset due to finger splay angle.)
 
 function solveIK(worldTarget, options={}){
   const local = chassis.worldToLocal(worldTarget.clone());
@@ -1464,11 +1465,12 @@ const auto = {
   goalX: 0, goalZ: 0, regoalT: 0,
   driveSpeed: 0,
   target: null,
-  approachDist: 1.0, // stop close enough for arm to reach the ground rock
+  approachDist: 0.85, // stop close enough for arm to reach the ground rock
   analyzeTimer: 0,
   armPhase: '',
   drop: null,
-  odo: 0
+  odo: 0,
+  dwellTimer: 0
 };
 
 function pickRandomGoal(){
@@ -1575,16 +1577,18 @@ function tickAuto(dt){
     }
     case 'DEPLOY': {
       if(auto.armPhase === 'extend'){
-        // Reach hovering 25cm above rock, gripper points DOWN at it
-        const above = auto.target.position.clone(); above.y += 0.25;
+        // Reach hovering 15cm above rock, gripper points DOWN at it
+        armState.lerpSpeed = 55; // slower for dramatic effect
+        const above = auto.target.position.clone(); above.y += 0.15;
         const ik = solveIK(above, { topDown: true, j4: 0, j6: 15 });
         armState.targetJ = { ...ik, grip:90 };
         auto.armPhase = 'extending';
       } else if(auto.armPhase === 'extending'){
         if(!armState.targetJ){ auto.armPhase = 'lower'; }
       } else if(auto.armPhase === 'lower'){
-        // Lower to 12cm above rock, twist wrist (J6) for fine alignment
-        const at = auto.target.position.clone(); at.y += 0.12;
+        // Lower to 3cm above rock surface — nearly touching for LIBS scan
+        armState.lerpSpeed = 40; // even slower for precision approach
+        const at = auto.target.position.clone(); at.y += 0.03;
         const ik = solveIK(at, { topDown: true, j4: -10, j6: -25 });
         armState.targetJ = { ...ik, grip:90 };
         auto.armPhase = 'lowering';
@@ -1616,20 +1620,34 @@ function tickAuto(dt){
     }
     case 'GRIP': {
       if(auto.armPhase === 'descend'){
-        // Lower so fingertips contact the rock surface (topDown puts wrist above, gripper drops down)
+        // Lower so fingertips KISS the ground — push slightly below rock surface
+        // This ensures the gripper physically contacts the ground/rock
+        armState.lerpSpeed = 30; // very slow for ground contact — dramatic
         const at = auto.target.position.clone();
-        at.y += 0.005;
+        at.y -= 0.03; // negative offset = fingertips press INTO the surface
         const ik = solveIK(at, { topDown: true, j4: 0, j6: 0 });
         armState.targetJ = { ...ik, grip:90 };
         auto.armPhase = 'descending';
       } else if(auto.armPhase === 'descending'){
         if(!armState.targetJ){
-          // TOUCH SENSOR fires
+          // TOUCH SENSOR fires — fingertips are on the ground!
           armState.touchActive = true;
-          armState.touch = 1.5 + Math.random()*1.4;
-          fingerL.userData.touchPad.material.emissiveIntensity = 1.6;
-          fingerR.userData.touchPad.material.emissiveIntensity = 1.6;
-          // Close gripper around the rock (J7 closes)
+          armState.touch = 2.2 + Math.random()*1.4;
+          fingerL.userData.touchPad.material.emissiveIntensity = 2.0;
+          fingerR.userData.touchPad.material.emissiveIntensity = 2.0;
+          // Dwell at ground contact (pause to show the kiss)
+          auto.armPhase = 'dwell';
+          auto.dwellTimer = 0;
+        }
+      } else if(auto.armPhase === 'dwell'){
+        // Hold at ground contact for 0.8s so the viewer sees the gripper touching
+        auto.dwellTimer += dt;
+        // Slight finger micro-tremor to show contact pressure
+        fingerL.userData.touchPad.material.emissiveIntensity = 1.6 + Math.sin(auto.dwellTimer*20)*0.4;
+        fingerR.userData.touchPad.material.emissiveIntensity = 1.6 + Math.sin(auto.dwellTimer*20)*0.4;
+        if(auto.dwellTimer > 0.8){
+          // Close gripper around the rock (J7 closes) — slow deliberate grip
+          armState.lerpSpeed = 35;
           armState.targetJ = { j1:armState.j1, j2:armState.j2, j3:armState.j3,
                                j4:armState.j4, j5:armState.j5, j6:armState.j6, grip:0 };
           auto.armPhase = 'closing';
@@ -1644,7 +1662,8 @@ function tickAuto(dt){
           auto.target.position.set(0, 0.36, 0);
           auto.target.scale.set(1, 1, 1);
           updateGripStatus();
-          // Lift up with VISIBLE wrist roll (J4) and yaw (J6) motion
+          // Lift up SLOWLY with VISIBLE wrist roll (J4) and yaw (J6) motion
+          armState.lerpSpeed = 45; // slow lift for visibility
           armState.targetJ = { j1:armState.j1, j2:-40, j3:70,
                                j4: 30, j5: -50, j6: 20, grip:0 };
           auto.armPhase = 'lifting';
@@ -1653,6 +1672,7 @@ function tickAuto(dt){
         if(!armState.targetJ){
           auto.state = 'STOW';
           auto.armPhase = 'toTray';
+          armState.lerpSpeed = 50; // moderate speed for transport
           // Compute drop slot now and store it for placement
           auto.drop = getTrayWorld();
           // Move drop ring to indicate landing zone
@@ -1665,15 +1685,17 @@ function tickAuto(dt){
     }
     case 'STOW': {
       if(auto.armPhase === 'toTray'){
-        // Hover 35cm above the drop slot, gripper points DOWN
-        const above = auto.drop.world.clone(); above.y += 0.35;
+        // Hover 25cm above the drop slot, gripper points DOWN
+        armState.lerpSpeed = 50;
+        const above = auto.drop.world.clone(); above.y += 0.25;
         const ik = solveIK(above, { topDown: true, j4: -20, j6: 30 });
         armState.targetJ = { ...ik, grip:0 };
         auto.armPhase = 'travelling';
       } else if(auto.armPhase === 'travelling'){
         if(!armState.targetJ){
-          // Lower until rock hovers ~5cm above tray, then release
-          const at = auto.drop.world.clone(); at.y += 0.05;
+          // Lower until rock nearly touches the tray surface, then release
+          armState.lerpSpeed = 35; // slow placement
+          const at = auto.drop.world.clone(); at.y += 0.01; // very close to tray
           const ik = solveIK(at, { topDown: true, j4: 0, j6: 0 });
           armState.targetJ = { ...ik, grip:0 };
           auto.armPhase = 'placing';
@@ -1713,7 +1735,8 @@ function tickAuto(dt){
         }
       } else if(auto.armPhase === 'opening'){
         if(!armState.targetJ){
-          // Stow with wrist motion
+          // Stow with wrist motion — restore normal arm speed
+          armState.lerpSpeed = 75;
           armState.targetJ = { j1:0, j2:-25, j3:60, j4:-15, j5:-15, j6:0, grip:90 };
           auto.armPhase = 'home';
         }
